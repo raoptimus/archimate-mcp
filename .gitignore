@@ -1,0 +1,16 @@
+# AI
+CLAUDE.md
+AGENTS.md
+.claude
+.mcp.json
+
+# Binaries
+.build
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
