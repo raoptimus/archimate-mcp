@@ -10,23 +10,27 @@ import (
 
 // Registry holds all tool handlers.
 type Registry struct {
-	Element      *ElementTools
-	Relationship *RelationshipTools
-	View         *ViewTools
-	ViewObject   *ViewObjectTools
-	Model        *ModelTools
-	Property     *PropertyTools
+	Folder         *FolderTools
+	Element        *ElementTools
+	Relationship   *RelationshipTools
+	View           *ViewTools
+	ViewObject     *ViewObjectTools
+	ViewConnection *ViewConnectionTools
+	Model          *ModelTools
+	Property       *PropertyTools
 }
 
 // NewRegistry creates a new Registry with all tools initialized.
 func NewRegistry(c *client.Client) *Registry {
 	return &Registry{
-		Element:      NewElementTools(c),
-		Relationship: NewRelationshipTools(c),
-		View:         NewViewTools(c),
-		ViewObject:   NewViewObjectTools(c),
-		Model:        NewModelTools(c),
-		Property:     NewPropertyTools(c),
+		Folder:         NewFolderTools(c),
+		Element:        NewElementTools(c),
+		Relationship:   NewRelationshipTools(c),
+		View:           NewViewTools(c),
+		ViewObject:     NewViewObjectTools(c),
+		ViewConnection: NewViewConnectionTools(c),
+		Model:          NewModelTools(c),
+		Property:       NewPropertyTools(c),
 	}
 }
 
@@ -65,6 +69,22 @@ func wrapHandler[In, Out any](handler func(context.Context, In) (Out, error)) fu
 
 // RegisterAll registers all tools with the MCP server.
 func (r *Registry) RegisterAll(server *mcp.Server) {
+	// Folder tools
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_folder_list",
+		Description: "List all folders in the ArchiMate model recursively. Returns folder id, name, and parent_id.",
+	}, wrapHandler(r.Folder.List))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_folder_get",
+		Description: "Get an ArchiMate folder by ID. Returns folder details including element_count and subfolder_count.",
+	}, wrapHandler(r.Folder.Get))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_folder_create",
+		Description: "Create a new folder inside a parent folder",
+	}, wrapHandler(r.Folder.Create))
+
 	// Element tools
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_element_list",
@@ -90,6 +110,11 @@ func (r *Registry) RegisterAll(server *mcp.Server) {
 		Name:        "archi_element_delete",
 		Description: "Delete an ArchiMate element by ID",
 	}, wrapHandler(r.Element.Delete))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_element_move",
+		Description: "Move an ArchiMate element to a different folder. Returns the element with updated folder_id, folder_name, folder_path.",
+	}, wrapHandler(r.Element.Move))
 
 	// Relationship tools
 	mcp.AddTool(server, &mcp.Tool{
@@ -117,6 +142,11 @@ func (r *Registry) RegisterAll(server *mcp.Server) {
 		Description: "Delete an ArchiMate relationship by ID",
 	}, wrapHandler(r.Relationship.Delete))
 
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_relationship_move",
+		Description: "Move an ArchiMate relationship to a different folder",
+	}, wrapHandler(r.Relationship.Move))
+
 	// View tools
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_view_list",
@@ -125,7 +155,7 @@ func (r *Registry) RegisterAll(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_view_get",
-		Description: "Get an ArchiMate view by ID",
+		Description: "Get an ArchiMate view by ID. Returns folder_id, folder_path, object_count, connection_count.",
 	}, wrapHandler(r.View.Get))
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -144,30 +174,81 @@ func (r *Registry) RegisterAll(server *mcp.Server) {
 	}, wrapHandler(r.View.Delete))
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_move",
+		Description: "Move an ArchiMate view to a different folder",
+	}, wrapHandler(r.View.Move))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_auto_connect",
+		Description: "Automatically create visual connections on a view for all relationships between elements already placed on the view. Returns the number of connections created.",
+	}, wrapHandler(r.View.AutoConnect))
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_view_export_image",
-		Description: "Export an ArchiMate view as a PNG image (base64-encoded). Returns JSON with id, name, format, and data fields.",
+		Description: "Export an ArchiMate view as a PNG image (base64-encoded). Returns id, name, format, width, height, mime_type, and data fields.",
 	}, wrapHandler(r.View.ExportImage))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_export_svg",
+		Description: "Export an ArchiMate view as SVG. Note: requires SVG export plugin in Archi.",
+	}, wrapHandler(r.View.ExportSVG))
 
 	// View Object tools
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_view_object_list",
-		Description: "List all objects (elements) placed on an ArchiMate view",
+		Description: "List objects on a view. Set recursive=true to include nested objects with parent_object_id, depth, and children_count. Each object includes style information.",
 	}, wrapHandler(r.ViewObject.List))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_view_object_add",
-		Description: "Add an ArchiMate element to a view at specified position (x, y, width, height)",
+		Description: "Add an ArchiMate element to a view at specified position. Supports parent_object_id to nest inside a container (e.g., System Software inside Application Component).",
 	}, wrapHandler(r.ViewObject.Add))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_view_object_update",
-		Description: "Update position and size of an element on a view",
+		Description: "Update position, size, parent, and/or style of an element on a view. Supports parent_object_id for reparenting (empty string = move to view root). Style fields: fill_color, line_color, font_color, line_width, opacity, text_alignment.",
 	}, wrapHandler(r.ViewObject.Update))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archi_view_object_remove",
 		Description: "Remove an element from a view (does not delete the element itself)",
 	}, wrapHandler(r.ViewObject.Remove))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_object_copy_style",
+		Description: "Copy visual style (fill_color, line_color, font_color, line_width, opacity, text_alignment) from a source object to a target object on the same view",
+	}, wrapHandler(r.ViewObject.CopyStyle))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_object_clone_from_template",
+		Description: "Create a new diagram object with the same style and size as a source object but for a different element. Useful for creating visually consistent diagrams.",
+	}, wrapHandler(r.ViewObject.Clone))
+
+	// View Connection tools
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_connection_list",
+		Description: "List all visual connections on a view. Returns relationship_id, relationship_type, source_object_id, target_object_id for each connection.",
+	}, wrapHandler(r.ViewConnection.List))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_connection_add",
+		Description: "Add a visual connection on a view for an existing relationship. Requires relationship_id, source_object_id (diagram object), and target_object_id (diagram object).",
+	}, wrapHandler(r.ViewConnection.Add))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_connection_update",
+		Description: "Update a visual connection on a view",
+	}, wrapHandler(r.ViewConnection.Update))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_connection_remove",
+		Description: "Remove a visual connection from a view (does not delete the underlying relationship)",
+	}, wrapHandler(r.ViewConnection.Remove))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_view_connection_copy_style",
+		Description: "Copy visual style (line_color, line_width) from a source connection to a target connection",
+	}, wrapHandler(r.ViewConnection.CopyStyle))
 
 	// Model tools
 	mcp.AddTool(server, &mcp.Tool{
@@ -179,6 +260,11 @@ func (r *Registry) RegisterAll(server *mcp.Server) {
 		Name:        "archi_model_save",
 		Description: "Save the current ArchiMate model",
 	}, wrapHandler(r.Model.Save))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "archi_model_repair",
+		Description: "Remove orphaned diagram references — objects with null concepts and connections with null relationships. Returns count of removed orphans.",
+	}, wrapHandler(r.Model.Repair))
 
 	// Property tools
 	mcp.AddTool(server, &mcp.Tool{

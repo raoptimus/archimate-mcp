@@ -1,12 +1,9 @@
-.PHONY: build clean tidy
+.PHONY: build clean tidy lint install help
 
 BUILD_DIR ?= .build
 PKG_NAME=archimate-mcp
 
 build:
-	go build -o $(BINARY_NAME) .
-
-build: help
 	@[ -d ${BUILD_DIR} ] || mkdir -p ${BUILD_DIR}
 	CGO_ENABLED=0 go build -o ${BUILD_DIR}/${PKG_NAME} .
 	@file  ${BUILD_DIR}/${PKG_NAME}
@@ -22,4 +19,4 @@ lint: ## Run linter
 	@golangci-lint run --timeout 5m
 
 install:
-	@go install ./main.go
+	@go install ./

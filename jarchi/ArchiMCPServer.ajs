@@ -211,36 +211,69 @@ function findViewsFolder() {
     return null;
 }
 
+// Get folder info for any EObject (element, relationship, view)
+function getFolderInfo(eObj) {
+    var container = eObj.eContainer();
+    if (!container || !IFolder.class.isInstance(container)) {
+        return { folder_id: "", folder_name: "", folder_path: "" };
+    }
+    var folderId = container.getId();
+    var folderName = container.getName();
+    var parts = [folderName];
+    var parent = container.eContainer();
+    while (parent && IFolder.class.isInstance(parent)) {
+        parts.unshift(parent.getName());
+        parent = parent.eContainer();
+    }
+    return {
+        folder_id: folderId,
+        folder_name: folderName,
+        folder_path: parts.join(" / ")
+    };
+}
+
 function elementToJSON(e) {
+    var fi = getFolderInfo(e);
     return {
         id: e.getId(),
         type: getTypeKebab(e),
         name: e.getName(),
-        documentation: e.getDocumentation() || ""
+        documentation: e.getDocumentation() || "",
+        folder_id: fi.folder_id,
+        folder_name: fi.folder_name,
+        folder_path: fi.folder_path
     };
 }
 
 function relationshipToJSON(r) {
+    var fi = getFolderInfo(r);
     return {
         id: r.getId(),
         type: getTypeKebab(r),
         name: r.getName() || "",
         documentation: r.getDocumentation() || "",
         source_id: r.getSource() ? r.getSource().getId() : "",
-        target_id: r.getTarget() ? r.getTarget().getId() : ""
+        target_id: r.getTarget() ? r.getTarget().getId() : "",
+        folder_id: fi.folder_id,
+        folder_name: fi.folder_name,
+        folder_path: fi.folder_path
     };
 }
 
 function viewToJSON(v) {
+    var fi = getFolderInfo(v);
     return {
         id: v.getId(),
         type: "archimate-diagram-model",
         name: v.getName(),
-        documentation: v.getDocumentation() || ""
+        documentation: v.getDocumentation() || "",
+        folder_id: fi.folder_id,
+        folder_name: fi.folder_name,
+        folder_path: fi.folder_path
     };
 }
 
-function viewObjectToJSON(obj) {
+function viewObjectToJSON(obj, parentId, depth) {
     var result = {
         id: obj.getId(),
         type: "diagram-model-archimate-object",
@@ -250,12 +283,116 @@ function viewObjectToJSON(obj) {
         height: obj.getBounds().getHeight()
     };
     try {
-        if (Java.type("com.archimatetool.model.IDiagramModelArchimateObject").class.isInstance(obj)) {
+        if (IDiagramModelArchimateObject.class.isInstance(obj)) {
             var concept = obj.getArchimateElement();
             if (concept) result.element_id = concept.getId();
         }
     } catch(e) {}
+    if (parentId !== undefined && parentId !== null) {
+        result.parent_object_id = parentId;
+    }
+    if (depth !== undefined) {
+        result.depth = depth;
+    }
+    try {
+        result.children_count = obj.getChildren ? obj.getChildren().size() : 0;
+    } catch(e) {
+        result.children_count = 0;
+    }
+    result.style = getObjectStyle(obj);
     return result;
+}
+
+// Style helpers
+function getObjectStyle(obj) {
+    var style = {};
+    try {
+        var fc = obj.getFillColor();
+        if (fc) style.fill_color = "" + fc;
+        var lc = obj.getLineColor();
+        if (lc) style.line_color = "" + lc;
+        var fnc = obj.getFontColor();
+        if (fnc) style.font_color = "" + fnc;
+        style.line_width = obj.getLineWidth();
+        style.opacity = obj.getAlpha();
+        style.text_alignment = obj.getTextAlignment();
+    } catch(e) {}
+    return style;
+}
+
+function setObjectStyle(obj, style) {
+    try {
+        if (style.fill_color !== undefined) obj.setFillColor(style.fill_color || null);
+        if (style.line_color !== undefined) obj.setLineColor(style.line_color || null);
+        if (style.font_color !== undefined) obj.setFontColor(style.font_color || null);
+        if (style.line_width !== undefined) obj.setLineWidth(style.line_width);
+        if (style.opacity !== undefined) obj.setAlpha(style.opacity);
+        if (style.text_alignment !== undefined) obj.setTextAlignment(style.text_alignment);
+    } catch(e) {}
+}
+
+function getConnectionStyle(conn) {
+    var style = {};
+    try {
+        var lc = conn.getLineColor();
+        if (lc) style.line_color = "" + lc;
+        style.line_width = conn.getLineWidth();
+    } catch(e) {}
+    return style;
+}
+
+function setConnectionStyle(conn, style) {
+    try {
+        if (style.line_color !== undefined) conn.setLineColor(style.line_color || null);
+        if (style.line_width !== undefined) conn.setLineWidth(style.line_width);
+    } catch(e) {}
+}
+
+function connectionToJSON(conn) {
+    var result = {
+        id: conn.getId(),
+        type: "diagram-model-archimate-connection",
+        source_object_id: conn.getSource() ? conn.getSource().getId() : "",
+        target_object_id: conn.getTarget() ? conn.getTarget().getId() : ""
+    };
+    try {
+        if (IDiagramModelArchimateConnection.class.isInstance(conn)) {
+            var rel = conn.getArchimateRelationship();
+            if (rel) {
+                result.relationship_id = rel.getId();
+                result.relationship_type = getTypeKebab(rel);
+            }
+        }
+    } catch(e) {}
+    result.style = getConnectionStyle(conn);
+    return result;
+}
+
+// Collect view objects recursively
+function collectViewObjects(container, parentId, depth, recursive, results) {
+    var children = container.getChildren();
+    for (var i = 0; i < children.size(); i++) {
+        var child = children.get(i);
+        results.push(viewObjectToJSON(child, parentId, depth));
+        if (recursive && child.getChildren && child.getChildren().size() > 0) {
+            collectViewObjects(child, child.getId(), depth + 1, recursive, results);
+        }
+    }
+}
+
+// Collect all connections from view recursively
+function collectViewConnections(container, results) {
+    var children = container.getChildren();
+    for (var i = 0; i < children.size(); i++) {
+        var child = children.get(i);
+        var srcConns = child.getSourceConnections();
+        for (var j = 0; j < srcConns.size(); j++) {
+            results.push(connectionToJSON(srcConns.get(j)));
+        }
+        if (child.getChildren) {
+            collectViewConnections(child, results);
+        }
+    }
 }
 
 // Iterate all elements in the model
@@ -607,6 +744,21 @@ function handleFoldersList(req) {
     return [200, { items: results, total_count: results.length }];
 }
 
+function handleFolderGet(req) {
+    var id = extractID(req.path, "/api/folders/");
+    var folder = findFolderByID(__model, id);
+    if (!folder) return [404, { error: "folder not found: " + id }];
+    var fi = getFolderInfo(folder);
+    return [200, {
+        id: folder.getId(),
+        name: folder.getName(),
+        parent_id: fi.folder_id,
+        folder_path: fi.folder_path,
+        element_count: folder.getElements().size(),
+        subfolder_count: folder.getFolders().size()
+    }];
+}
+
 function handleFolderCreate(req) {
     var body = JSON.parse(req.body);
     if (!body.name || !body.parent_id) return [400, { error: "name and parent_id are required" }];
@@ -620,6 +772,66 @@ function handleFolderCreate(req) {
         return [201, { id: folder.getId(), name: folder.getName(), parent_id: body.parent_id }];
     } catch(ex) {
         return [500, { error: "createFolder failed: " + ex }];
+    }
+}
+
+function handleElementMove(req) {
+    var id = req.path.replace(/^\/api\/elements\//, "").replace(/\/move$/, "");
+    var body = JSON.parse(req.body);
+    if (!body.folder_id) return [400, { error: "folder_id is required" }];
+    var elem = findByID(id);
+    if (!elem) return [404, { error: "element not found: " + id }];
+    var targetFolder = findFolderByID(__model, body.folder_id);
+    if (!targetFolder) return [404, { error: "folder not found: " + body.folder_id }];
+    try {
+        var currentFolder = elem.eContainer();
+        if (IFolder.class.isInstance(currentFolder)) {
+            currentFolder.getElements().remove(elem);
+        }
+        targetFolder.getElements().add(elem);
+        return [200, elementToJSON(elem)];
+    } catch(ex) {
+        return [500, { error: "moveElement failed: " + ex }];
+    }
+}
+
+function handleRelationshipMove(req) {
+    var id = req.path.replace(/^\/api\/relationships\//, "").replace(/\/move$/, "");
+    var body = JSON.parse(req.body);
+    if (!body.folder_id) return [400, { error: "folder_id is required" }];
+    var rel = findByID(id);
+    if (!rel) return [404, { error: "relationship not found: " + id }];
+    var targetFolder = findFolderByID(__model, body.folder_id);
+    if (!targetFolder) return [404, { error: "folder not found: " + body.folder_id }];
+    try {
+        var currentFolder = rel.eContainer();
+        if (IFolder.class.isInstance(currentFolder)) {
+            currentFolder.getElements().remove(rel);
+        }
+        targetFolder.getElements().add(rel);
+        return [200, relationshipToJSON(rel)];
+    } catch(ex) {
+        return [500, { error: "moveRelationship failed: " + ex }];
+    }
+}
+
+function handleViewMove(req) {
+    var id = req.path.replace(/^\/api\/views\//, "").replace(/\/move$/, "");
+    var body = JSON.parse(req.body);
+    if (!body.folder_id) return [400, { error: "folder_id is required" }];
+    var view = findByID(id);
+    if (!view) return [404, { error: "view not found: " + id }];
+    var targetFolder = findFolderByID(__model, body.folder_id);
+    if (!targetFolder) return [404, { error: "folder not found: " + body.folder_id }];
+    try {
+        var currentFolder = view.eContainer();
+        if (IFolder.class.isInstance(currentFolder)) {
+            currentFolder.getElements().remove(view);
+        }
+        targetFolder.getElements().add(view);
+        return [200, viewToJSON(view)];
+    } catch(ex) {
+        return [500, { error: "moveView failed: " + ex }];
     }
 }
 
@@ -771,7 +983,11 @@ function handleViewGet(req) {
     var id = extractID(req.path, "/api/views/");
     var view = findByID(id);
     if (!view) return [404, { error: "view not found: " + id }];
-    return [200, viewToJSON(view)];
+    var result = viewToJSON(view);
+    var counts = countViewContents(view);
+    result.object_count = counts.objects;
+    result.connection_count = counts.connections;
+    return [200, result];
 }
 
 function handleViewUpdate(req) {
@@ -796,11 +1012,9 @@ function handleViewObjectsList(req) {
     var viewID = extractID(req.path, "/api/views/");
     var view = findByID(viewID);
     if (!view) return [404, { error: "view not found: " + viewID }];
+    var recursive = req.query["recursive"] === "true";
     var results = [];
-    var children = view.getChildren();
-    for (var i = 0; i < children.size(); i++) {
-        results.push(viewObjectToJSON(children.get(i)));
-    }
+    collectViewObjects(view, "", 0, recursive, results);
     return [200, { items: results, total_count: results.length }];
 }
 
@@ -828,18 +1042,23 @@ function handleViewExportImage(req) {
         var margin = parseInt(req.query["margin"] || "10");
 
         var image = DiagramUtils.createImage(view, scale, margin);
+        var imageData = image.getImageData();
+        var imgWidth = imageData.width;
+        var imgHeight = imageData.height;
         var imageLoader = new ImageLoader();
-        imageLoader.data = [image.getImageData()];
+        imageLoader.data = [imageData];
         var byteStream = new ByteArrayOutputStream();
         imageLoader.save(byteStream, SWT.IMAGE_PNG);
         var pngBytes = byteStream.toByteArray();
         image.dispose();
-
         var base64Data = Base64.getEncoder().encodeToString(pngBytes);
         return [200, {
             id: view.getId(),
             name: view.getName(),
             format: "PNG",
+            width: imgWidth,
+            height: imgHeight,
+            mime_type: "image/png",
             data: base64Data
         }];
     } catch(ex) {
@@ -856,8 +1075,28 @@ function handleViewObjectAdd(req) {
     var element = findByID(body.element_id);
     if (!element) return [404, { error: "element not found: " + body.element_id }];
     try {
-        var obj = addElementToView(view, element, body.x, body.y, body.width, body.height);
-        return [201, viewObjectToJSON(obj)];
+        var factory = IArchimateFactory.eINSTANCE;
+        var dmo = factory.createDiagramModelArchimateObject();
+        dmo.setId(EcoreUtil.generateUUID());
+        dmo.setArchimateElement(element);
+
+        var bounds = factory.createBounds();
+        bounds.setX(body.x || 10);
+        bounds.setY(body.y || 10);
+        bounds.setWidth(body.width || 120);
+        bounds.setHeight(body.height || 55);
+        dmo.setBounds(bounds);
+
+        var parentContainer = view;
+        if (body.parent_object_id) {
+            var parentObj = findByID(body.parent_object_id);
+            if (!parentObj) return [404, { error: "parent object not found: " + body.parent_object_id }];
+            parentContainer = parentObj;
+        }
+        parentContainer.getChildren().add(dmo);
+
+        var parentId = body.parent_object_id || "";
+        return [201, viewObjectToJSON(dmo, parentId, 0)];
     } catch(ex) {
         return [500, { error: "addToView failed: " + ex }];
     }
@@ -880,6 +1119,30 @@ function handleViewObjectUpdate(req) {
     } catch(ex) {
         return [500, { error: "updateBounds failed: " + ex }];
     }
+    // Style support
+    if (body.style) {
+        setObjectStyle(obj, body.style);
+    }
+    // Reparenting support
+    if (body.parent_object_id !== undefined) {
+        try {
+            var viewID = parts[3]; // /api/views/{viewID}/objects/{objID}
+            var newParent;
+            if (body.parent_object_id === "" || body.parent_object_id === null) {
+                newParent = findByID(viewID);
+            } else {
+                newParent = findByID(body.parent_object_id);
+                if (!newParent) return [404, { error: "parent object not found: " + body.parent_object_id }];
+            }
+            var currentParent = obj.eContainer();
+            if (currentParent !== newParent) {
+                currentParent.getChildren().remove(obj);
+                newParent.getChildren().add(obj);
+            }
+        } catch(ex) {
+            return [500, { error: "reparent failed: " + ex }];
+        }
+    }
     return [200, viewObjectToJSON(obj)];
 }
 
@@ -890,6 +1153,170 @@ function handleViewObjectDelete(req) {
     if (!obj) return [404, { error: "view object not found: " + objID }];
     EcoreUtil.delete(obj, true);
     return [200, { status: "deleted", id: objID }];
+}
+
+function handleViewConnectionsList(req) {
+    var viewID = req.path.replace(/^\/api\/views\//, "").replace(/\/connections.*$/, "");
+    var view = findByID(viewID);
+    if (!view) return [404, { error: "view not found: " + viewID }];
+    var results = [];
+    collectViewConnections(view, results);
+    return [200, { items: results, total_count: results.length }];
+}
+
+function handleViewConnectionAdd(req) {
+    var viewID = req.path.replace(/^\/api\/views\//, "").replace(/\/connections$/, "");
+    var view = findByID(viewID);
+    if (!view) return [404, { error: "view not found: " + viewID }];
+    var body = JSON.parse(req.body);
+    if (!body.relationship_id || !body.source_object_id || !body.target_object_id)
+        return [400, { error: "relationship_id, source_object_id, and target_object_id are required" }];
+    var rel = findByID(body.relationship_id);
+    if (!rel) return [404, { error: "relationship not found: " + body.relationship_id }];
+    var srcObj = findByID(body.source_object_id);
+    if (!srcObj) return [404, { error: "source object not found: " + body.source_object_id }];
+    var tgtObj = findByID(body.target_object_id);
+    if (!tgtObj) return [404, { error: "target object not found: " + body.target_object_id }];
+    try {
+        var factory = IArchimateFactory.eINSTANCE;
+        var conn = factory.createDiagramModelArchimateConnection();
+        conn.setId(EcoreUtil.generateUUID());
+        conn.setArchimateRelationship(rel);
+        conn.setSource(srcObj);
+        conn.setTarget(tgtObj);
+        srcObj.getSourceConnections().add(conn);
+        tgtObj.getTargetConnections().add(conn);
+        return [201, connectionToJSON(conn)];
+    } catch(ex) {
+        return [500, { error: "addConnection failed: " + ex }];
+    }
+}
+
+function handleViewConnectionUpdate(req) {
+    var parts = req.path.split("/");
+    var connID = parts[parts.length - 1];
+    var conn = findByID(connID);
+    if (!conn) return [404, { error: "connection not found: " + connID }];
+    var body = JSON.parse(req.body);
+    if (body.style) {
+        setConnectionStyle(conn, body.style);
+    }
+    return [200, connectionToJSON(conn)];
+}
+
+function handleViewConnectionDelete(req) {
+    var parts = req.path.split("/");
+    var connID = parts[parts.length - 1];
+    var conn = findByID(connID);
+    if (!conn) return [404, { error: "connection not found: " + connID }];
+    EcoreUtil.delete(conn, true);
+    return [200, { status: "deleted", id: connID }];
+}
+
+function handleViewObjectCopyStyle(req) {
+    var parts = req.path.split("/");
+    // /api/views/{viewID}/objects/{objID}/copy-style
+    var objID = parts[5];
+    var obj = findByID(objID);
+    if (!obj) return [404, { error: "view object not found: " + objID }];
+    var body = JSON.parse(req.body);
+    if (!body.source_object_id) return [400, { error: "source_object_id is required" }];
+    var srcObj = findByID(body.source_object_id);
+    if (!srcObj) return [404, { error: "source object not found: " + body.source_object_id }];
+    try {
+        var style = getObjectStyle(srcObj);
+        setObjectStyle(obj, style);
+        return [200, viewObjectToJSON(obj)];
+    } catch(ex) {
+        return [500, { error: "copyStyle failed: " + ex }];
+    }
+}
+
+function handleViewConnectionCopyStyle(req) {
+    var parts = req.path.split("/");
+    // /api/views/{viewID}/connections/{connID}/copy-style
+    var connID = parts[5];
+    var conn = findByID(connID);
+    if (!conn) return [404, { error: "connection not found: " + connID }];
+    var body = JSON.parse(req.body);
+    if (!body.source_connection_id) return [400, { error: "source_connection_id is required" }];
+    var srcConn = findByID(body.source_connection_id);
+    if (!srcConn) return [404, { error: "source connection not found: " + body.source_connection_id }];
+    try {
+        var style = getConnectionStyle(srcConn);
+        setConnectionStyle(conn, style);
+        return [200, connectionToJSON(conn)];
+    } catch(ex) {
+        return [500, { error: "copyStyle failed: " + ex }];
+    }
+}
+
+function handleViewObjectClone(req) {
+    var viewID = req.path.replace(/^\/api\/views\//, "").replace(/\/objects\/clone$/, "");
+    var view = findByID(viewID);
+    if (!view) return [404, { error: "view not found: " + viewID }];
+    var body = JSON.parse(req.body);
+    if (!body.source_object_id || !body.element_id)
+        return [400, { error: "source_object_id and element_id are required" }];
+    var srcObj = findByID(body.source_object_id);
+    if (!srcObj) return [404, { error: "source object not found: " + body.source_object_id }];
+    var element = findByID(body.element_id);
+    if (!element) return [404, { error: "element not found: " + body.element_id }];
+    try {
+        var factory = IArchimateFactory.eINSTANCE;
+        var dmo = factory.createDiagramModelArchimateObject();
+        dmo.setId(EcoreUtil.generateUUID());
+        dmo.setArchimateElement(element);
+
+        // Copy bounds from source, override position if specified
+        var srcBounds = srcObj.getBounds();
+        var bounds = factory.createBounds();
+        bounds.setX(body.x !== undefined ? body.x : srcBounds.getX());
+        bounds.setY(body.y !== undefined ? body.y : srcBounds.getY());
+        bounds.setWidth(srcBounds.getWidth());
+        bounds.setHeight(srcBounds.getHeight());
+        dmo.setBounds(bounds);
+
+        // Copy style from source
+        var style = getObjectStyle(srcObj);
+        setObjectStyle(dmo, style);
+
+        var parentContainer = view;
+        if (body.parent_object_id) {
+            var parentObj = findByID(body.parent_object_id);
+            if (parentObj) parentContainer = parentObj;
+        }
+        parentContainer.getChildren().add(dmo);
+
+        return [201, viewObjectToJSON(dmo, body.parent_object_id || "", 0)];
+    } catch(ex) {
+        return [500, { error: "cloneObject failed: " + ex }];
+    }
+}
+
+function handleViewExportSVG(req) {
+    var viewID = req.path.replace(/^\/api\/views\//, "").replace(/\/export-svg$/, "");
+    var view = findByID(viewID);
+    if (!view) return [404, { error: "view not found: " + viewID }];
+    return [501, { error: "SVG export is not available in jArchi timerExec context (GraalJS cannot access SVG export plugin classes). Use archi_view_export_image for PNG export instead." }];
+}
+
+// Count objects and connections in a view recursively
+function countViewContents(container) {
+    var counts = { objects: 0, connections: 0 };
+    var children = container.getChildren();
+    for (var i = 0; i < children.size(); i++) {
+        var child = children.get(i);
+        counts.objects++;
+        var srcConns = child.getSourceConnections();
+        counts.connections += srcConns.size();
+        if (child.getChildren && child.getChildren().size() > 0) {
+            var sub = countViewContents(child);
+            counts.objects += sub.objects;
+            counts.connections += sub.connections;
+        }
+    }
+    return counts;
 }
 
 function handleRepair(req) {
@@ -960,6 +1387,10 @@ function route(req) {
     // Folders
     if (p === "/api/folders" && m === "GET") return handleFoldersList(req);
     if (p === "/api/folders" && m === "POST") return handleFolderCreate(req);
+    if (/^\/api\/folders\/[^/]+$/.test(p) && m === "GET") return handleFolderGet(req);
+
+    // Element move (before generic element routes)
+    if (/^\/api\/elements\/[^/]+\/move$/.test(p) && m === "POST") return handleElementMove(req);
 
     // Elements
     if (p === "/api/elements" && m === "GET") return handleElementsList(req);
@@ -968,6 +1399,9 @@ function route(req) {
     if (p.indexOf("/api/elements/") === 0 && m === "PUT") return handleElementUpdate(req);
     if (p.indexOf("/api/elements/") === 0 && m === "DELETE") return handleElementDelete(req);
 
+    // Relationship move (before generic relationship routes)
+    if (/^\/api\/relationships\/[^/]+\/move$/.test(p) && m === "POST") return handleRelationshipMove(req);
+
     // Relationships
     if (p === "/api/relationships" && m === "GET") return handleRelationshipsList(req);
     if (p === "/api/relationships" && m === "POST") return handleRelationshipCreate(req);
@@ -975,11 +1409,30 @@ function route(req) {
     if (p.indexOf("/api/relationships/") === 0 && m === "PUT") return handleRelationshipUpdate(req);
     if (p.indexOf("/api/relationships/") === 0 && m === "DELETE") return handleRelationshipDelete(req);
 
+    // View move (before generic view routes)
+    if (/^\/api\/views\/[^/]+\/move$/.test(p) && m === "POST") return handleViewMove(req);
+
     // View export image
     if (/^\/api\/views\/[^/]+\/export-image$/.test(p) && m === "GET") return handleViewExportImage(req);
 
+    // View export SVG
+    if (/^\/api\/views\/[^/]+\/export-svg$/.test(p) && m === "GET") return handleViewExportSVG(req);
+
     // View auto-connect
     if (/^\/api\/views\/[^/]+\/auto-connect$/.test(p) && m === "POST") return handleViewAutoConnect(req);
+
+    // View Connection copy-style (before generic connection routes)
+    if (/^\/api\/views\/[^/]+\/connections\/[^/]+\/copy-style$/.test(p) && m === "POST") return handleViewConnectionCopyStyle(req);
+
+    // View Connections (before View Objects — longer path match first)
+    if (/^\/api\/views\/[^/]+\/connections$/.test(p) && m === "GET") return handleViewConnectionsList(req);
+    if (/^\/api\/views\/[^/]+\/connections$/.test(p) && m === "POST") return handleViewConnectionAdd(req);
+    if (/^\/api\/views\/[^/]+\/connections\/[^/]+$/.test(p) && m === "PUT") return handleViewConnectionUpdate(req);
+    if (/^\/api\/views\/[^/]+\/connections\/[^/]+$/.test(p) && m === "DELETE") return handleViewConnectionDelete(req);
+
+    // View Object copy-style and clone (before generic object routes)
+    if (/^\/api\/views\/[^/]+\/objects\/[^/]+\/copy-style$/.test(p) && m === "POST") return handleViewObjectCopyStyle(req);
+    if (/^\/api\/views\/[^/]+\/objects\/clone$/.test(p) && m === "POST") return handleViewObjectClone(req);
 
     // View Objects (before Views — longer path match first)
     if (/^\/api\/views\/[^/]+\/objects$/.test(p) && m === "GET") return handleViewObjectsList(req);

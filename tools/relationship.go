@@ -142,3 +142,24 @@ func (t *RelationshipTools) Delete(ctx context.Context, input *RelationshipDelet
 	}
 	return result, nil
 }
+
+// RelationshipMoveInput represents input for archi_relationship_move tool.
+type RelationshipMoveInput struct {
+	// Relationship ID
+	ID string `json:"id"`
+	// Target folder ID
+	FolderID string `json:"folder_id"`
+}
+
+// Move moves a relationship to a different folder.
+func (t *RelationshipTools) Move(ctx context.Context, input *RelationshipMoveInput) (*client.Relationship, error) {
+	if input.ID == "" || input.FolderID == "" {
+		return nil, fmt.Errorf("%w: id and folder_id are required", ErrInvalidInput)
+	}
+	body := map[string]any{"folder_id": input.FolderID}
+	result, err := t.client.MoveRelationship(ctx, input.ID, body)
+	if err != nil {
+		return nil, WrapError("relationship_move", err)
+	}
+	return result, nil
+}

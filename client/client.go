@@ -89,6 +89,34 @@ func (c *Client) SaveModel(ctx context.Context) (*StatusResponse, error) {
 	return &result, err
 }
 
+// --- Folders ---
+
+func (c *Client) ListFolders(ctx context.Context) (*ListResponse[Folder], error) {
+	var result ListResponse[Folder]
+	err := c.doRequest(ctx, http.MethodGet, "/api/folders", nil, &result)
+	return &result, err
+}
+
+func (c *Client) GetFolder(ctx context.Context, id string) (*Folder, error) {
+	var result Folder
+	err := c.doRequest(ctx, http.MethodGet, "/api/folders/"+id, nil, &result)
+	return &result, err
+}
+
+func (c *Client) CreateFolder(ctx context.Context, body map[string]any) (*Folder, error) {
+	var result Folder
+	err := c.doRequest(ctx, http.MethodPost, "/api/folders", body, &result)
+	return &result, err
+}
+
+// --- Model Operations ---
+
+func (c *Client) RepairModel(ctx context.Context) (*StatusResponse, error) {
+	var result StatusResponse
+	err := c.doRequest(ctx, http.MethodPost, "/api/model/repair", nil, &result)
+	return &result, err
+}
+
 // --- Elements ---
 
 func (c *Client) ListElements(ctx context.Context, elemType, name string) (*ListResponse[Element], error) {
@@ -130,6 +158,12 @@ func (c *Client) UpdateElement(ctx context.Context, id string, body map[string]a
 func (c *Client) DeleteElement(ctx context.Context, id string) (*StatusResponse, error) {
 	var result StatusResponse
 	err := c.doRequest(ctx, http.MethodDelete, "/api/elements/"+id, nil, &result)
+	return &result, err
+}
+
+func (c *Client) MoveElement(ctx context.Context, id string, body map[string]any) (*Element, error) {
+	var result Element
+	err := c.doRequest(ctx, http.MethodPost, "/api/elements/"+id+"/move", body, &result)
 	return &result, err
 }
 
@@ -180,6 +214,12 @@ func (c *Client) DeleteRelationship(ctx context.Context, id string) (*StatusResp
 	return &result, err
 }
 
+func (c *Client) MoveRelationship(ctx context.Context, id string, body map[string]any) (*Relationship, error) {
+	var result Relationship
+	err := c.doRequest(ctx, http.MethodPost, "/api/relationships/"+id+"/move", body, &result)
+	return &result, err
+}
+
 // --- Views ---
 
 func (c *Client) ListViews(ctx context.Context) (*ListResponse[View], error) {
@@ -212,6 +252,18 @@ func (c *Client) DeleteView(ctx context.Context, id string) (*StatusResponse, er
 	return &result, err
 }
 
+func (c *Client) MoveView(ctx context.Context, id string, body map[string]any) (*View, error) {
+	var result View
+	err := c.doRequest(ctx, http.MethodPost, "/api/views/"+id+"/move", body, &result)
+	return &result, err
+}
+
+func (c *Client) AutoConnectView(ctx context.Context, viewID string) (*StatusResponse, error) {
+	var result StatusResponse
+	err := c.doRequest(ctx, http.MethodPost, "/api/views/"+viewID+"/auto-connect", nil, &result)
+	return &result, err
+}
+
 func (c *Client) ExportViewAsImage(ctx context.Context, viewID string, scale float64, margin int) (*ViewImageExport, error) {
 	params := url.Values{}
 	if scale > 0 {
@@ -234,9 +286,13 @@ func (c *Client) ExportViewAsImage(ctx context.Context, viewID string, scale flo
 
 // --- View Objects ---
 
-func (c *Client) ListViewObjects(ctx context.Context, viewID string) (*ListResponse[ViewObject], error) {
+func (c *Client) ListViewObjects(ctx context.Context, viewID string, recursive bool) (*ListResponse[ViewObject], error) {
+	path := "/api/views/" + viewID + "/objects"
+	if recursive {
+		path += "?recursive=true"
+	}
 	var result ListResponse[ViewObject]
-	err := c.doRequest(ctx, http.MethodGet, "/api/views/"+viewID+"/objects", nil, &result)
+	err := c.doRequest(ctx, http.MethodGet, path, nil, &result)
 	return &result, err
 }
 
@@ -255,6 +311,56 @@ func (c *Client) UpdateViewObject(ctx context.Context, viewID, objID string, bod
 func (c *Client) DeleteViewObject(ctx context.Context, viewID, objID string) (*StatusResponse, error) {
 	var result StatusResponse
 	err := c.doRequest(ctx, http.MethodDelete, "/api/views/"+viewID+"/objects/"+objID, nil, &result)
+	return &result, err
+}
+
+func (c *Client) CopyViewObjectStyle(ctx context.Context, viewID, objID string, body map[string]any) (*ViewObject, error) {
+	var result ViewObject
+	err := c.doRequest(ctx, http.MethodPost, "/api/views/"+viewID+"/objects/"+objID+"/copy-style", body, &result)
+	return &result, err
+}
+
+func (c *Client) CloneViewObject(ctx context.Context, viewID string, body map[string]any) (*ViewObject, error) {
+	var result ViewObject
+	err := c.doRequest(ctx, http.MethodPost, "/api/views/"+viewID+"/objects/clone", body, &result)
+	return &result, err
+}
+
+// --- View Connections ---
+
+func (c *Client) ListViewConnections(ctx context.Context, viewID string) (*ListResponse[ViewConnection], error) {
+	var result ListResponse[ViewConnection]
+	err := c.doRequest(ctx, http.MethodGet, "/api/views/"+viewID+"/connections", nil, &result)
+	return &result, err
+}
+
+func (c *Client) AddViewConnection(ctx context.Context, viewID string, body map[string]any) (*ViewConnection, error) {
+	var result ViewConnection
+	err := c.doRequest(ctx, http.MethodPost, "/api/views/"+viewID+"/connections", body, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateViewConnection(ctx context.Context, viewID, connID string, body map[string]any) (*ViewConnection, error) {
+	var result ViewConnection
+	err := c.doRequest(ctx, http.MethodPut, "/api/views/"+viewID+"/connections/"+connID, body, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteViewConnection(ctx context.Context, viewID, connID string) (*StatusResponse, error) {
+	var result StatusResponse
+	err := c.doRequest(ctx, http.MethodDelete, "/api/views/"+viewID+"/connections/"+connID, nil, &result)
+	return &result, err
+}
+
+func (c *Client) CopyViewConnectionStyle(ctx context.Context, viewID, connID string, body map[string]any) (*ViewConnection, error) {
+	var result ViewConnection
+	err := c.doRequest(ctx, http.MethodPost, "/api/views/"+viewID+"/connections/"+connID+"/copy-style", body, &result)
+	return &result, err
+}
+
+func (c *Client) ExportViewAsSVG(ctx context.Context, viewID string) (*ViewImageExport, error) {
+	var result ViewImageExport
+	err := c.doRequest(ctx, http.MethodGet, "/api/views/"+viewID+"/export-svg", nil, &result)
 	return &result, err
 }
 

@@ -39,3 +39,15 @@ func (t *ModelTools) Save(ctx context.Context, input *ModelSaveInput) (*client.S
 	}
 	return result, nil
 }
+
+// ModelRepairInput represents input for archi_model_repair tool.
+type ModelRepairInput struct{}
+
+// Repair removes orphaned diagram references (objects with null concepts, connections with null relationships).
+func (t *ModelTools) Repair(ctx context.Context, input *ModelRepairInput) (*client.StatusResponse, error) {
+	result, err := t.client.RepairModel(ctx)
+	if err != nil {
+		return nil, WrapError("model_repair", err)
+	}
+	return result, nil
+}

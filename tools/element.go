@@ -137,3 +137,24 @@ func (t *ElementTools) Delete(ctx context.Context, input *ElementDeleteInput) (*
 	}
 	return result, nil
 }
+
+// ElementMoveInput represents input for archi_element_move tool.
+type ElementMoveInput struct {
+	// Element ID
+	ID string `json:"id"`
+	// Target folder ID
+	FolderID string `json:"folder_id"`
+}
+
+// Move moves an element to a different folder.
+func (t *ElementTools) Move(ctx context.Context, input *ElementMoveInput) (*client.Element, error) {
+	if input.ID == "" || input.FolderID == "" {
+		return nil, fmt.Errorf("%w: id and folder_id are required", ErrInvalidInput)
+	}
+	body := map[string]any{"folder_id": input.FolderID}
+	result, err := t.client.MoveElement(ctx, input.ID, body)
+	if err != nil {
+		return nil, WrapError("element_move", err)
+	}
+	return result, nil
+}

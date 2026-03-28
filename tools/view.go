@@ -121,6 +121,45 @@ func (t *ViewTools) Delete(ctx context.Context, input *ViewDeleteInput) (*client
 	return result, nil
 }
 
+// ViewMoveInput represents input for archi_view_move tool.
+type ViewMoveInput struct {
+	// View ID
+	ID string `json:"id"`
+	// Target folder ID
+	FolderID string `json:"folder_id"`
+}
+
+// Move moves a view to a different folder.
+func (t *ViewTools) Move(ctx context.Context, input *ViewMoveInput) (*client.View, error) {
+	if input.ID == "" || input.FolderID == "" {
+		return nil, fmt.Errorf("%w: id and folder_id are required", ErrInvalidInput)
+	}
+	body := map[string]any{"folder_id": input.FolderID}
+	result, err := t.client.MoveView(ctx, input.ID, body)
+	if err != nil {
+		return nil, WrapError("view_move", err)
+	}
+	return result, nil
+}
+
+// ViewAutoConnectInput represents input for archi_view_auto_connect tool.
+type ViewAutoConnectInput struct {
+	// View ID
+	ID string `json:"id"`
+}
+
+// AutoConnect automatically creates visual connections for all relationships between elements on the view.
+func (t *ViewTools) AutoConnect(ctx context.Context, input *ViewAutoConnectInput) (*client.StatusResponse, error) {
+	if input.ID == "" {
+		return nil, fmt.Errorf("%w: id is required", ErrInvalidInput)
+	}
+	result, err := t.client.AutoConnectView(ctx, input.ID)
+	if err != nil {
+		return nil, WrapError("view_auto_connect", err)
+	}
+	return result, nil
+}
+
 // ViewExportImageInput represents input for archi_view_export_image tool.
 type ViewExportImageInput struct {
 	ID     string  `json:"id"`
@@ -144,6 +183,23 @@ func (t *ViewTools) ExportImage(ctx context.Context, input *ViewExportImageInput
 	result, err := t.client.ExportViewAsImage(ctx, input.ID, scale, margin)
 	if err != nil {
 		return nil, WrapError("view_export_image", err)
+	}
+	return result, nil
+}
+
+// ViewExportSVGInput represents input for archi_view_export_svg tool.
+type ViewExportSVGInput struct {
+	ID string `json:"id"`
+}
+
+// ExportSVG exports an ArchiMate view as SVG.
+func (t *ViewTools) ExportSVG(ctx context.Context, input *ViewExportSVGInput) (*client.ViewImageExport, error) {
+	if input.ID == "" {
+		return nil, fmt.Errorf("%w: id is required", ErrInvalidInput)
+	}
+	result, err := t.client.ExportViewAsSVG(ctx, input.ID)
+	if err != nil {
+		return nil, WrapError("view_export_svg", err)
 	}
 	return result, nil
 }
